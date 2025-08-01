@@ -61,151 +61,55 @@ def download_image(url, folder, title, page, idx):
         logger.debug(f"이미지 다운로드 성공: {path}")
         return path
     except Exception as e:
-        logger.warning(f"이미지 다운로드 실패: {url}, 오류: {e}")
+        logger.warning(f"이미지 다운로드 실패: {url}")
         return ""
 
-def crawl_kyobo_fixed(keyword, pages):
-    """실제 HTML 구조 기반 교보문고 크롤러"""
+def crawl_yes24(keyword, pages):
+    """예스24 크롤러 (1페이지 문제 해결)"""
     if pages <= 0:
         return []
     
     driver = create_driver()
-    wait = WebDriverWait(driver, 20)
+    wait = WebDriverWait(driver, 25)
     data = []
     
     try:
-        # 방법 1: 직접 검색 결과 URL로 이동 (가장 안전)
-        encoded_keyword = urllib.parse.quote(keyword)
-        search_url = f"https://search.kyobobook.co.kr/search?keyword={encoded_keyword}&gbCode=TOT&target=total"
-        
-        logger.info(f"교보문고 직접 검색 URL 접속: {search_url}")
-        driver.get(search_url)
-        time.sleep(5)
-        
-        # 검색 결과가 로드되었는지 확인
-        try:
-            wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-            page_text = driver.find_element(By.TAG_NAME, "body").text
-            
-            if "검색결과가 없습니다" in page_text or "결과가 없습니다" in page_text:
-                logger.warning("교보문고에서 검색 결과가 없습니다.")
-                return data
-            
-            logger.info("✅ 교보문고 검색 결과 페이지 로딩 완료")
-            
-        except Exception as e:
-            logger.warning(f"교보문고 페이지 로딩 확인 중 오류: {e}")
-            
-            # 방법 2: 메인 페이지에서 검색창 이용
-            logger.info("대안 방법: 메인 페이지에서 검색창 이용")
-            try:
-                driver.get("http://www.kyobobook.co.kr/")
-                time.sleep(3)
-                
-                # 검색창 찾기 - 실제 구조 기반
-                search_input = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "input#searchKeyword")))
-                logger.info("✅ 교보문고 검색창 발견: input#searchKeyword")
-                
-                search_input.clear()
-                search_input.send_keys(keyword)
-                search_input.send_keys(Keys.ENTER)  # Enter 키로 검색
-                time.sleep(5)
-                
-            except Exception as e2:
-                logger.error(f"교보문고 대안 방법도 실패: {e2}")
-                return data
-        
-        # 페이지별 크롤링
         for page in range(1, pages + 1):
-            logger.info(f"교보문고 {page}페이지 크롤링 중...")
+            logger.info(f"예스24 {page}페이지 크롤링 중...")
             
-            if page > 1:
-                # 페이지 이동 - 여러 방법 시도
-                page_moved = False
-                
-                # 방법 1: 직접 URL 이동
-                try:
-                    current_url = driver.current_url
-                    if "page=" in current_url:
-                        new_url = current_url.replace(f"page={page-1}", f"page={page}")
-                    else:
-                        separator = "&" if "?" in current_url else "?"
-                        new_url = current_url + f"{separator}page={page}"
-                    
-                    driver.get(new_url)
-                    time.sleep(3)
-                    page_moved = True
-                    logger.info(f"✅ URL 직접 이동으로 {page}페이지 이동 성공")
-                    
-                except Exception as e:
-                    logger.warning(f"URL 직접 이동 실패: {e}")
-                
-                # 방법 2: 페이지 링크 클릭
-                if not page_moved:
-                    page_selectors = [
-                        f"a[href*='page={page}']",
-                        f".pagination a:contains('{page}')",
-                        f".paging a[href*='page={page}']"
-                    ]
-                    
-                    for selector in page_selectors:
-                        try:
-                            nav = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, selector)))
-                            nav.click()
-                            time.sleep(3)
-                            page_moved = True
-                            logger.info(f"✅ 링크 클릭으로 {page}페이지 이동 성공")
-                            break
-                        except:
-                            continue
-                
-                if not page_moved:
-                    logger.warning(f"교보문고 {page}페이지로 이동할 수 없습니다.")
-                    break
+            # 1페이지와 다른 페이지 URL 다르게 처리
+            if page == 1:
+                url = f"http://www.yes24.com/Product/Search?domain=BOOK&query={keyword}"
+            else:
+                url = f"http://www.yes24.com/Product/Search?domain=BOOK&query={keyword}&page={page}"
             
-            # 상품 목록 찾기 - 다양한 셀렉터 시도
+            driver.get(url)
+            time.sleep(8 if page == 1 else 5)  # 1페이지는 더 오래 대기
+            
+            # 아이템 찾기 (여러 번 시도)
             items = []
-            item_selectors = [
-                ".prod_item",                    # 상품 아이템
-                ".product_list .item",           # 상품 목록의 아이템
-                ".search_list .item",            # 검색 목록의 아이템
-                "[class*='prod'][class*='item']", # prod와 item이 포함된 클래스
-                ".list_search_result li",        # 검색 결과 리스트
-                ".search_result .product",       # 검색 결과의 상품
-            ]
-            
-            for selector in item_selectors:
+            for attempt in range(5):
                 try:
-                    items = driver.find_elements(By.CSS_SELECTOR, selector)
+                    wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div.itemUnit")))
+                    items = driver.find_elements(By.CSS_SELECTOR, "div.itemUnit")
                     if items:
-                        logger.info(f"✅ 교보문고 아이템 발견: '{selector}' - {len(items)}개")
+                        logger.info(f"예스24 {page}페이지: {len(items)}개 아이템 발견")
                         break
+                    time.sleep(2)
                 except:
+                    time.sleep(2)
                     continue
             
             if not items:
-                logger.warning(f"교보문고 {page}페이지에서 아이템을 찾을 수 없습니다.")
-                
-                # 디버깅: 페이지 구조 확인
-                logger.info("페이지 구조 분석 중...")
-                try:
-                    all_elements = driver.find_elements(By.CSS_SELECTOR, "[class*='prod'], [class*='item'], [class*='book']")
-                    logger.info(f"prod/item/book 관련 요소 {len(all_elements)}개 발견")
-                    
-                    for i, elem in enumerate(all_elements[:5]):  # 처음 5개만
-                        class_name = elem.get_attribute("class")
-                        tag_name = elem.tag_name
-                        logger.info(f"  요소 {i+1}: <{tag_name} class='{class_name}'>")
-                        
-                except Exception as e:
-                    logger.warning(f"페이지 구조 분석 실패: {e}")
-                
+                logger.warning(f"예스24 {page}페이지: 아이템을 찾을 수 없음")
                 continue
             
             # 데이터 추출
             for idx, item in enumerate(items, start=1):
                 row = {
+                    "사이트": "예스24",
                     "검색어": keyword, 
+                    "페이지": page,
                     "책제목": "", 
                     "저자": "", 
                     "가격": "", 
@@ -214,176 +118,371 @@ def crawl_kyobo_fixed(keyword, pages):
                     "이미지": ""
                 }
                 
-                # 제목 추출 - 다양한 셀렉터 시도
-                title_selectors = [
-                    ".prod_name",                # 상품명
-                    ".book_title",               # 책 제목
-                    "a[class*='title']",         # 제목 링크
-                    ".title",                    # 일반 제목
-                    "h3 a",                      # h3 안의 링크
-                    "a[href*='/product/']",      # 상품 페이지 링크
-                ]
+                try:
+                    row["책제목"] = item.find_element(By.CSS_SELECTOR, "a.gd_name").text.strip()
+                except: pass
                 
-                for sel in title_selectors:
+                try:
+                    row["저자"] = item.find_element(By.CSS_SELECTOR, "span.authPub.info_auth a").text.strip()
+                except: pass
+                
+                try:
+                    row["출판사"] = item.find_element(By.CSS_SELECTOR, "span.authPub.info_pub a").text.strip()
+                except: pass
+                
+                try:
+                    row["출판일"] = item.find_element(By.CSS_SELECTOR, "span.authPub.info_date").text.strip()
+                except: pass
+                
+                try:
+                    row["가격"] = item.find_element(By.CSS_SELECTOR, "strong.txt_num em.yes_b").text.strip()
+                except: pass
+                
+                try:
+                    img_url = item.find_element(By.CSS_SELECTOR, "div.item_img img").get_attribute("src")
+                    if img_url:
+                        row["이미지"] = download_image(img_url, "yes24", row["책제목"], page, idx)
+                except: pass
+                
+                data.append(row)
+            
+            time.sleep(random.uniform(2, 4))
+            
+    except Exception as e:
+        logger.error(f"예스24 크롤링 오류: {e}")
+    finally:
+        driver.quit()
+    
+    return data
+
+def crawl_kyobo(keyword, pages):
+    """교보문고 크롤러"""
+    if pages <= 0:
+        return []
+    
+    driver = create_driver()
+    wait = WebDriverWait(driver, 20)
+    data = []
+    
+    try:
+        # 직접 검색 결과 URL로 이동
+        encoded_keyword = urllib.parse.quote(keyword)
+        search_url = f"https://search.kyobobook.co.kr/search?keyword={encoded_keyword}&gbCode=TOT&target=total"
+        
+        logger.info(f"교보문고 검색 URL 접속...")
+        driver.get(search_url)
+        time.sleep(5)
+        
+        for page in range(1, pages + 1):
+            logger.info(f"교보문고 {page}페이지 크롤링 중...")
+            
+            if page > 1:
+                # URL 직접 이동
+                try:
+                    current_url = driver.current_url
+                    separator = "&" if "?" in current_url else "?"
+                    new_url = current_url + f"{separator}page={page}"
+                    driver.get(new_url)
+                    time.sleep(3)
+                except:
+                    logger.warning(f"교보문고 {page}페이지 이동 실패")
+                    break
+            
+            # 아이템 찾기
+            items = []
+            item_selectors = [
+                ".prod_item",
+                ".product_list .item", 
+                ".search_list .item",
+                "[class*='prod'][class*='item']"
+            ]
+            
+            for selector in item_selectors:
+                try:
+                    items = driver.find_elements(By.CSS_SELECTOR, selector)
+                    if items:
+                        logger.info(f"교보문고 {page}페이지: {len(items)}개 아이템 발견")
+                        break
+                except:
+                    continue
+            
+            if not items:
+                logger.warning(f"교보문고 {page}페이지: 아이템을 찾을 수 없음")
+                continue
+            
+            # 데이터 추출
+            for idx, item in enumerate(items, start=1):
+                row = {
+                    "사이트": "교보문고",
+                    "검색어": keyword, 
+                    "페이지": page,
+                    "책제목": "", 
+                    "저자": "", 
+                    "가격": "", 
+                    "출판사": "", 
+                    "출판일": "", 
+                    "이미지": ""
+                }
+                
+                # 제목
+                for sel in [".prod_name", ".book_title", "a[class*='title']"]:
                     try:
-                        title_element = item.find_element(By.CSS_SELECTOR, sel)
-                        title_text = title_element.text.strip()
-                        if title_text:
-                            row["책제목"] = title_text
-                            break
-                    except:
-                        continue
+                        row["책제목"] = item.find_element(By.CSS_SELECTOR, sel).text.strip()
+                        break
+                    except: continue
                 
-                # 저자 추출
-                author_selectors = [
-                    ".author",                   # 저자
-                    ".writer",                   # 작가
-                    "[class*='author']",         # author가 포함된 클래스
-                    ".prod_author",              # 상품 저자
-                ]
-                
-                for sel in author_selectors:
+                # 저자
+                for sel in [".author", ".writer", "[class*='author']"]:
                     try:
-                        author_element = item.find_element(By.CSS_SELECTOR, sel)
-                        author_text = author_element.text.strip()
-                        if author_text:
-                            row["저자"] = author_text
-                            break
-                    except:
-                        continue
+                        row["저자"] = item.find_element(By.CSS_SELECTOR, sel).text.strip()
+                        break
+                    except: continue
                 
-                # 출판사 추출
-                publisher_selectors = [
-                    ".publisher",                # 출판사
-                    ".prod_publisher",           # 상품 출판사
-                    "[class*='publish']",        # publish가 포함된 클래스
-                    ".company",                  # 회사
-                ]
-                
-                for sel in publisher_selectors:
+                # 출판사
+                for sel in [".publisher", ".prod_publisher", "[class*='publish']"]:
                     try:
-                        publisher_element = item.find_element(By.CSS_SELECTOR, sel)
-                        publisher_text = publisher_element.text.strip()
-                        if publisher_text:
-                            row["출판사"] = publisher_text
-                            break
-                    except:
-                        continue
+                        row["출판사"] = item.find_element(By.CSS_SELECTOR, sel).text.strip()
+                        break
+                    except: continue
                 
-                # 출판일 추출
-                date_selectors = [
-                    ".date",                     # 날짜
-                    ".publish_date",             # 출판일
-                    "[class*='date']",           # date가 포함된 클래스
-                    ".prod_date",                # 상품 날짜
-                ]
-                
-                for sel in date_selectors:
+                # 출판일
+                for sel in [".date", ".publish_date", "[class*='date']"]:
                     try:
-                        date_element = item.find_element(By.CSS_SELECTOR, sel)
-                        date_text = date_element.text.strip()
-                        if date_text:
-                            row["출판일"] = date_text
-                            break
-                    except:
-                        continue
+                        row["출판일"] = item.find_element(By.CSS_SELECTOR, sel).text.strip()
+                        break
+                    except: continue
                 
-                # 가격 추출
-                price_selectors = [
-                    ".price",                    # 가격
-                    ".prod_price",               # 상품 가격
-                    "[class*='price']",          # price가 포함된 클래스
-                    ".cost",                     # 비용
-                    "em[class*='price']",        # price가 포함된 em
-                ]
-                
-                for sel in price_selectors:
+                # 가격
+                for sel in [".price", ".prod_price", "[class*='price']"]:
                     try:
-                        price_element = item.find_element(By.CSS_SELECTOR, sel)
-                        price_text = price_element.text.replace(",", "").strip()
-                        if price_text:
-                            row["가격"] = price_text
-                            break
-                    except:
-                        continue
+                        row["가격"] = item.find_element(By.CSS_SELECTOR, sel).text.replace(",", "").strip()
+                        break
+                    except: continue
                 
-                # 이미지 추출
-                img_selectors = [
-                    "img[class*='prod']",        # prod가 포함된 이미지
-                    ".prod_img img",             # 상품 이미지
-                    ".book_img img",             # 책 이미지
-                    "img[alt*='표지']",          # 표지 이미지
-                    "img",                       # 모든 이미지
-                ]
-                
-                for sel in img_selectors:
+                # 이미지
+                for sel in ["img[class*='prod']", ".prod_img img", "img"]:
                     try:
                         img_element = item.find_element(By.CSS_SELECTOR, sel)
                         img_url = img_element.get_attribute("data-src") or img_element.get_attribute("src")
                         if img_url and img_url.startswith("http"):
                             row["이미지"] = download_image(img_url, "kyobo", row["책제목"], page, idx)
                             break
-                    except:
-                        continue
+                    except: continue
                 
                 data.append(row)
             
-            logger.info(f"✅ 교보문고 {page}페이지 완료: {len(items)}개 아이템 처리")
             time.sleep(random.uniform(2, 4))
             
     except Exception as e:
-        logger.error(f"교보문고 크롤링 중 전체 오류: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
+        logger.error(f"교보문고 크롤링 오류: {e}")
     finally:
         driver.quit()
     
     return data
 
-def test_kyobo(keyword, pages):
-    """교보문고 테스트"""
-    logger.info(f"=== 교보문고 테스트 시작: '{keyword}' ===")
+def crawl_aladin(keyword, pages):
+    """알라딘 크롤러 (URL 직접 이동 방식)"""
+    if pages <= 0:
+        return []
     
-    results = crawl_kyobo_fixed(keyword, pages)
+    driver = create_driver()
+    wait = WebDriverWait(driver, 20)
+    data = []
     
-    if results:
-        logger.info("=== 교보문고 크롤링 결과 분석 ===")
-        total_items = len(results)
-        items_with_title = sum(1 for item in results if item['책제목'])
-        items_with_author = sum(1 for item in results if item['저자'])
-        items_with_publisher = sum(1 for item in results if item['출판사'])
-        items_with_date = sum(1 for item in results if item['출판일'])
-        items_with_price = sum(1 for item in results if item['가격'])
-        items_with_image = sum(1 for item in results if item['이미지'])
+    try:
+        driver.get("https://www.aladin.co.kr/home/welcome.aspx")
+        time.sleep(5)
         
-        logger.info(f"총 아이템: {total_items}")
-        logger.info(f"제목: {items_with_title}/{total_items} ({items_with_title/total_items*100:.1f}%)")
-        logger.info(f"저자: {items_with_author}/{total_items} ({items_with_author/total_items*100:.1f}%)")
-        logger.info(f"출판사: {items_with_publisher}/{total_items} ({items_with_publisher/total_items*100:.1f}%)")
-        logger.info(f"출판일: {items_with_date}/{total_items} ({items_with_date/total_items*100:.1f}%)")
-        logger.info(f"가격: {items_with_price}/{total_items} ({items_with_price/total_items*100:.1f}%)")
-        logger.info(f"이미지: {items_with_image}/{total_items} ({items_with_image/total_items*100:.1f}%)")
+        # 검색
+        try:
+            search_input = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "#SearchWord")))
+            search_input.clear()
+            search_input.send_keys(keyword)
+            
+            search_btn = driver.find_element(By.CSS_SELECTOR, "button.search_btn")
+            search_btn.click()
+            time.sleep(5)
+        except:
+            logger.error("알라딘 검색 실패")
+            return data
         
-        # 엑셀 저장
+        for page in range(1, pages + 1):
+            logger.info(f"알라딘 {page}페이지 크롤링 중...")
+            
+            if page > 1:
+                # URL 직접 이동
+                try:
+                    current_url = driver.current_url
+                    if "page=" in current_url:
+                        new_url = current_url.replace(f"page={page-1}", f"page={page}")
+                    else:
+                        new_url = current_url + f"&page={page}"
+                    driver.get(new_url)
+                    time.sleep(3)
+                except:
+                    logger.warning(f"알라딘 {page}페이지 이동 실패")
+                    break
+            
+            # 아이템 찾기
+            try:
+                items = driver.find_elements(By.CSS_SELECTOR, "div.ss_book_box")
+                if not items:
+                    items = driver.find_elements(By.CSS_SELECTOR, ".book_box")
+                
+                if items:
+                    logger.info(f"알라딘 {page}페이지: {len(items)}개 아이템 발견")
+                else:
+                    logger.warning(f"알라딘 {page}페이지: 아이템을 찾을 수 없음")
+                    continue
+            except:
+                logger.warning(f"알라딘 {page}페이지: 아이템 찾기 실패")
+                continue
+            
+            # 데이터 추출
+            for idx, item in enumerate(items, start=1):
+                row = {
+                    "사이트": "알라딘",
+                    "검색어": keyword, 
+                    "페이지": page,
+                    "책제목": "", 
+                    "저자": "", 
+                    "가격": "", 
+                    "출판사": "", 
+                    "출판일": "", 
+                    "이미지": ""
+                }
+                
+                # 제목
+                try:
+                    row["책제목"] = item.find_element(By.CSS_SELECTOR, "a.bo3").text.strip()
+                except: pass
+                
+                # 저자, 출판사, 출판일
+                try:
+                    info_elements = item.find_elements(By.CSS_SELECTOR, ".ss_book_list ul li")
+                    if len(info_elements) > 1:
+                        info_text = info_elements[1].text
+                        parts = [p.strip() for p in info_text.split("|")]
+                        row["저자"] = parts[0] if len(parts) > 0 else ""
+                        row["출판사"] = parts[1] if len(parts) > 1 else ""
+                        row["출판일"] = parts[2] if len(parts) > 2 else ""
+                except: pass
+                
+                # 가격
+                try:
+                    row["가격"] = item.find_element(By.CSS_SELECTOR, "span.ss_p2 em").text.strip()
+                except: pass
+                
+                # 이미지
+                try:
+                    img_url = item.find_element(By.CSS_SELECTOR, "div.cover_area img").get_attribute("src")
+                    if img_url:
+                        row["이미지"] = download_image(img_url, "aladin", row["책제목"], page, idx)
+                except: pass
+                
+                data.append(row)
+            
+            time.sleep(random.uniform(2, 4))
+            
+    except Exception as e:
+        logger.error(f"알라딘 크롤링 오류: {e}")
+    finally:
+        driver.quit()
+    
+    return data
+
+def crawl_all_sites(keyword, yes24_pages=3, kyobo_pages=3, aladin_pages=3):
+    """모든 사이트 통합 크롤링"""
+    logger.info(f"통합 크롤링 시작: '{keyword}'")
+    logger.info(f"계획: 예스24({yes24_pages}페이지), 교보문고({kyobo_pages}페이지), 알라딘({aladin_pages}페이지)")
+    
+    all_data = []
+    
+    # 예스24 크롤링
+    if yes24_pages > 0:
+        logger.info("=" * 50)
+        logger.info("예스24 크롤링 시작")
+        logger.info("=" * 50)
+        yes24_data = crawl_yes24(keyword, yes24_pages)
+        all_data.extend(yes24_data)
+        logger.info(f"예스24 완료: {len(yes24_data)}개 데이터 수집")
+    
+    # 교보문고 크롤링
+    if kyobo_pages > 0:
+        logger.info("=" * 50)
+        logger.info("교보문고 크롤링 시작")
+        logger.info("=" * 50)
+        kyobo_data = crawl_kyobo(keyword, kyobo_pages)
+        all_data.extend(kyobo_data)
+        logger.info(f"교보문고 완료: {len(kyobo_data)}개 데이터 수집")
+    
+    # 알라딘 크롤링
+    if aladin_pages > 0:
+        logger.info("=" * 50)
+        logger.info("알라딘 크롤링 시작")
+        logger.info("=" * 50)
+        aladin_data = crawl_aladin(keyword, aladin_pages)
+        all_data.extend(aladin_data)
+        logger.info(f"알라딘 완료: {len(aladin_data)}개 데이터 수집")
+    
+    # 결과 저장
+    if all_data:
+        logger.info("=" * 50)
+        logger.info("결과 저장 중...")
+        logger.info("=" * 50)
+        
+        df = pd.DataFrame(all_data)
+        
         ensure_dir("data")
-        path = os.path.join("data", f"{keyword}_kyobo_fixed.xlsx")
+        output_path = os.path.join("data", "crawl.xlsx")
         
-        df = pd.DataFrame(results)
-        df.to_excel(path, index=False)
+        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+            df.to_excel(writer, sheet_name="전체", index=False)
+            
+            # 사이트별 시트
+            for site in ["예스24", "교보문고", "알라딘"]:
+                site_data = df[df["사이트"] == site]
+                if not site_data.empty:
+                    site_data.to_excel(writer, sheet_name=site, index=False)
         
-        logger.info(f"✅ 결과 저장 완료: {path}")
+        # 통계 출력
+        logger.info("크롤링 완료!")
+        logger.info(f"총 수집 데이터: {len(all_data)}개")
         
-        # 샘플 데이터 출력
-        logger.info("=== 샘플 데이터 (처음 3개) ===")
-        for i, item in enumerate(results[:3], 1):
-            logger.info(f"아이템 {i}:")
-            logger.info(f"  제목: {item['책제목']}")
-            logger.info(f"  저자: {item['저자']}")
-            logger.info(f"  출판사: {item['출판사']}")
-            logger.info(f"  가격: {item['가격']}")
+        site_stats = df["사이트"].value_counts()
+        for site, count in site_stats.items():
+            logger.info(f"   {site}: {count}개")
+        
+        # 데이터 품질 분석
+        logger.info("데이터 품질 분석:")
+        total = len(all_data)
+        with_title = sum(1 for item in all_data if item['책제목'])
+        with_author = sum(1 for item in all_data if item['저자'])
+        with_publisher = sum(1 for item in all_data if item['출판사'])
+        with_date = sum(1 for item in all_data if item['출판일'])
+        with_price = sum(1 for item in all_data if item['가격'])
+        with_image = sum(1 for item in all_data if item['이미지'])
+        
+        logger.info(f"   제목: {with_title}/{total} ({with_title/total*100:.1f}%)")
+        logger.info(f"   저자: {with_author}/{total} ({with_author/total*100:.1f}%)")
+        logger.info(f"   출판사: {with_publisher}/{total} ({with_publisher/total*100:.1f}%)")
+        logger.info(f"   출판일: {with_date}/{total} ({with_date/total*100:.1f}%)")
+        logger.info(f"   가격: {with_price}/{total} ({with_price/total*100:.1f}%)")
+        logger.info(f"   이미지: {with_image}/{total} ({with_image/total*100:.1f}%)")
+        
+        logger.info(f"결과 파일: {output_path}")
+        
+        logger.info("샘플 데이터 (처음 3개):")
+        for i, item in enumerate(all_data[:3], 1):
+            logger.info(f"   {i}. [{item['사이트']}] {item['책제목']} - {item['저자']} ({item['가격']})")
+        
     else:
-        logger.warning("교보문고에서 수집된 데이터가 없습니다.")
+        logger.warning("수집된 데이터가 없습니다.")
 
 if __name__ == "__main__":
-    # 교보문고 테스트
-    test_kyobo("파이썬", 2)
+    crawl_all_sites(
+        keyword="소설",      
+        yes24_pages=3,
+        kyobo_pages=4, 
+        aladin_pages=5 
+    )
