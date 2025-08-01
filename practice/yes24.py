@@ -481,7 +481,7 @@ def crawl_all_sites(keyword, yes24_pages=3, kyobo_pages=3, aladin_pages=3):
 
 if __name__ == "__main__":
     crawl_all_sites(
-        keyword="소설",      
+        keyword="파이썬",      
         yes24_pages=3,
         kyobo_pages=4, 
         aladin_pages=5 
